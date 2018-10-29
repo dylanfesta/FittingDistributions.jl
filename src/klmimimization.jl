@@ -4,8 +4,28 @@
 Notation:
 alphas are the coefficients of fitting  distributions, betas are non-bound
 reparametrizations of alphas
-
 =#
+
+abstract type KLCostType end
+struct KLStandard <: KLCostType end
+struct KLReverse <: KLCostType end
+struct KLSymmetric <: KLCostType end
+
+abstract type AlphaRegus end
+struct AlphaNone <: AlphaRegus end
+struct AlphaSparse <: AlphaRegus
+  c::Float64
+end
+
+
+function _alpha_regularizer(g,alphas,regu::AlphaNone)
+  return 0.0 # meh
+end
+
+# 1-norm, it's positive, so it's just the sum, and gradient is 1.0 always
+function _alpha_regularizer(g,alphas,regu::AlphaSparse)
+  error("Work in progress!")
+end
 
 function repar(β::AbstractFloat)
     log(1+exp(β))  #this is beta
@@ -17,127 +37,104 @@ function invrepar(α::AbstractFloat)
     log(exp(α)-1)
 end
 
+function test_gradient_repar(x)
+  g_num = Calculus.gradient(repar,x)
+  g_an = drepar(x)
+  (g_num,g_an,g_num-g_an)
+end
+
+
+function columns_weighted_sum(mat,col_coef)
+  out = fill(zero(eltype(mat)),size(mat,1)) # same as fill(0.0, etc ... )
+  for (k,c) in enumerate(col_coef)
+      m=view(mat,:,k)
+      BLAS.axpy!(c,m,out)
+  end
+  out
+end
+
+
 
 """
-Forward KL cost function with gradient.
-g will be filled with the gradient
-betas are the coefficients
-Q has fit distributions as columns
+Main objective function , KL can be standard or reverse (both not implemented yet)
 """
-function kl_cost_fun(g,betas::Vector,Q::Matrix,p_target::Vector)
+function kl_objective_fun(g,betas::Vector,Q::Matrix,p_target::Vector ,
+    (kltype::KLCostType)=KLStandard(),
+    (alpharegu::AlphaRegus)=AlphaNone() )
   alphas=repar.(betas)
+  dalphas = drepar.(betas)
+  qfit = columns_weighted_sum(Q,alphas)
+  # this function is different depending on the kltype
+  cost = _kl_objective(g,qfit,alphas,Q, p_target,kltype)
+  # add alpha regularizer
+  alpha_cost = _alpha_regularizer(g,alphas,alpharegu)
+  # reparametrization
+  !isempty(g) && broadcast!(*,g,g,dalphas)
+  cost+alpha_cost
+end
+
+function _kl_objective(g,qfit,alphas,Q,p_target, kltype::KLStandard)
   asum=sum(alphas)
-  q_fit = similar(p_target)
-  for (k,alpha) in enumerate(alphas)
-      qk=view(Q,:,k)
-      BLAS.axpy!(alpha,qk,q_fit)
-  end
   # scale by sum and take the log  q_fit <- log(q_fit)
-  q_fit_log = broadcast!(q->log(q/asum),q_fit)
+  q_fit_log = @. log(qfit/asum)
   # sum over elements of p_target
   cost = dot(p_target,q_fit_log)
-  for k in 1:length(g)
-    q_ik_nrm = Q[:,k] ./ q_fit
+  for k in 1:length(g) # can probably be vectorized
+    q_ik_nrm = Q[:,k] ./ qfit
     g[k] = dot(p_target, q_ik_nrm) - inv(asum)
-    g .*= drepar.(betas)
+  end
+  cost
+end
+
+# reverse KL case
+function _kl_objective(g,qfit,alphas,Q,p_target, kltype::KLReverse)
+  asum=sum(alphas)
+  q_fit_nrm = qfit ./ asum
+  q_norm_targ = q_fit_nrm ./ p_target
+  cost= sum(@. q_fit_nrm*log( q_norm_targ))
+  if !isempty(g)
+      _mult = @. (log(q_norm_targ)+1)/asum^2
+      _rest=@. Q*asum - qfit
+      mul!(g, _rest' , _mult)
+  end
+  cost
+end
+
+function test_gradient(betas,Q,p_target,
+      (kltype::KLCostType)=KLStandard() )
+  g_an=zero(betas)
+  kl_objective_fun(g_an,betas,Q,p_target,kltype)
+  f_grad(bb) = kl_objective_fun(Float64[],bb,Q,p_target,kltype)
+  g_num = Calculus.gradient(f_grad,betas)
+  g_err =@.  2abs(g_an-g_num)/(g_an+g_num+eps(100.0))
+  (analytic=g_an,numerical=g_num,error=g_err)
+end
+
+
+# Now there are several targets , and several train examples, all in vectors
+function kl_objective_fun(g,betas,Qs::Vector{Matrix{T}},
+        p_targets::Vector{Vector{T}},
+        kltype::KLCostType,
+        ) where T<:AbstractFloat
+  cost=0
+  fill!(g,0.0)
+  g_add=zero(g)
+  g_temp=similar(g_add)
+  for (Q,p_targ) in zip(Qs,p_targets)
+      cost += kl_objective_fun(g_temp,betas,Q,p_targ,kltype)
+      g .+= g_temp # if g is empty, nothing will happen
   end
   return cost
 end
 
-function test_gradient(g,betas,Q,p_target)
-  g_an=similar(p_target)
-  kl_cost_fun(g_an,betas,Q,p_target)
-  f_grad(bb) = kl_cost_fun(Float64[],bb,Q,p_target)
-  g_num = Calculus.gradient(f_grad,betas)
-  g_err =@.  2(g_an-g_num)/(g_an+g_num+eps(100.0))
-  (analytic=g_an,numerical=g_num,error=g_err)
-end
 #
-#
-# function kl_cost_fun(g,betas,Qs::Vector{Matrix},p_targets::Vector{Vector})
-#     @assert length(Qs) == length(p_targets)
-#     cost=0
-#     g_add=zeros(length(g))
-#     _g_temp=copy(g_add)
-#     for (Q,p_targ) in zip(Qs,p_targets)
-#         cost +=kl_cost_fun(_g_temp,betas,Q,p_targ)
-#         if length(g)>0
-#             g_add.+=_g_temp
-#         end
-#     end
-#     g[:]=g_add
-#     return cost
-# end
-#
-# function kl_cost_fun_rev(g,betas,Q::Matrix,target::Vector)
-#     alphas=exp.(betas)
-#     _Qa=Q*alphas
-#     _asum=sum(alphas)
-#     qis=_Qa./_asum
-#     cost= sum(@. qis*log( qis/target))
-#     if length(g)>0
-#         _mult = @. (log(qis)-log(target)+1)/_asum^2
-#         _rest=broadcast(-,Q.*_asum,_Qa)
-#         g[1:end]=_mult'*_rest
-#         g.*=alphas
-#     end
-#     return cost
-# end
-#
-# function kl_cost_fun_rev(g,betas,Qs::Vector{Matrix},p_targets::Vector{Vector})
-#     @assert length(Qs) == length(p_targets)
-#     cost=0
-#     g_add=zeros(length(g))
-#     _g_temp=copy(g_add)
-#     for (Q,p_targ) in zip(Qs,p_targets)
-#         cost +=kl_cost_fun_rev(_g_temp,betas,Q,p_targ)
-#         if length(g)>0
-#             g_add.+=_g_temp
-#         end
-#     end
-#     g[:]=g_add
-#     return cost
-# end
-#
-# function get_Qdims(Q::Vector)
-#     size(Q[1],2)
-# end
-# function get_Qdims(Q::Matrix)
-#     size(Q,2)
-# end
-#
-# function kl_cost_test_grad(idx_test,Q,targ; xstart=[])
-#     dims=get_Qdims(Q)
-#     kl_cost_test_grad(idx_test,dims,Q,targ,xstart)
-# end
-# function kl_cost_test_grad(idx_test,dims,Q,targ,xstart)
-#     betas= isempty(xstart) ? log.(rand(dims)) : xstart
-#     g=Vector{Float64}(dims)
-#     betas_p= let x=copy(betas)
-#         x[idx_test]+=1E-6
-#         x
-#     end
-#     plus=kl_cost_fun([],betas_p,Q,targ)
-#     minus=kl_cost_fun(g,betas,Q,targ)
-#     (plus-minus)/1E-6 ,g[idx_test]
-# end
-#
-# function kl_cost_rev_test_grad(idx_test,Q,targ; xstart=[])
-#     dims=get_Qdims(Q)
-#     kl_cost_rev_test_grad(idx_test,dims,Q,targ,xstart)
-# end
-# function kl_cost_rev_test_grad(idx_test,dims,Q,targ,xstart)
-#     betas= isempty(xstart) ? log.(rand(dims)) : xstart
-#     g=Vector{Float64}(dims)
-#     betas_p= let x=copy(betas)
-#         x[idx_test]+=1E-6
-#         x
-#     end
-#     plus=kl_cost_fun_rev([],betas_p,Q,targ)
-#     minus=kl_cost_fun_rev(g,betas,Q,targ)
-#     (plus-minus)/1E-6 ,g[idx_test]
-# end
-#
+# # function get_Qdims(Q::Vector)
+# #     size(Q[1],2)
+# # end
+# # function get_Qdims(Q::Matrix)
+# #     size(Q,2)
+# # end
+# #
 # function get_qdistr(alphas,Q::Matrix)
 #     alphas_norm=alphas./sum(alphas)
 #     Q*alphas_norm
