@@ -1,10 +1,19 @@
 module FittingDistributions
 using LinearAlgebra , Statistics, Calculus
-using NLopt, Optim
+using Distributions, Random, StatsBase # mostly for testing
 
+# defines the struct of fitting problem, and some oprations on it
+include("fittingStructs.jl")
 
-# main content in here
+# fit by KL minimization
 include("klmimimization.jl")
+
+# use probabilistic inference on stan
+# (to be compared with analytic approaches)
+include("fitonstan.jl")
+
+# in order to make tests, I need to have data!
+include("mock_data.jl")
 
 
 end #of module Distr_fit
