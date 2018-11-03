@@ -12,7 +12,7 @@
   - `spk_bins` : boundaries of each bin, must be ordered, histograms include the left
   - `model_distr` : output distributions for each model for each stimulus
        dim 1 are probabilities for each bin, dim 2 are models,
-      dim 3 are inputs. The first dimension must sum to 1
+      dim 3 are unique inputs (views). The first dimension must sum to 1
 """
 struct SpkToFit{T}
   spks::Matrix{T}
@@ -25,8 +25,7 @@ struct SpkToFit{T}
     new{eltype(spks)}(spks,spk_bins,model_distr)
   end
 end
-
-n_models(s::SpkToFit) = size(s.spks,2)
+n_models(s::SpkToFit) = size(s.model_distr,2)
 n_bins(s::SpkToFit) = length(spk_bins)-1
 """
     function discrete_distribution(data::Vector,bins::Vector)
@@ -50,7 +49,7 @@ function bin_idx(data::AbstractVector{T},bins::Vector{Float64}) where T
   end
   out=similar(_data,Int32)
   for (i,dat) in enumerate(_data)
-   out[i] = findfirst( b -> b>dat, bins)
+   out[i] = findfirst( b -> b>dat, bins)-1
   end
   out
 end
@@ -59,22 +58,26 @@ end
 #
 function get_Q_ofdata(spikecounts::AbstractVector{T},
   q_img::AbstractMatrix,bins::AbstractVector) where T
-  n_trials = length(spikecounts)
   mybins = bin_idx(spikecounts,bins)
-  collect(transpose(q_img[mybins,:])) #over all models
+  @assert size(q_img,1) == length(bins)-1
+  q_img[mybins,:] #over all models and all trials!
 end
 
 function get_Q_ofdata(spikecounts_all::AbstractMatrix{T} ,
       q_all::AbstractArray{Float64,3},
       bins::AbstractVector) where T
   n_bins,n_models,n_views = size(q_all)
-  out=Matrix{Float64}(undef,n_models,n_inputs)
-  for vv in 1:n_views
-    out[:,vv] = get_Q_ofdata(
+  out = map(1:n_views) do vv
+    get_Q_ofdata(
       view(spikecounts_all,:,vv) ,
       view(q_all,:,:,vv), bins)
   end
-  out
+  n_trials = length(out[1])
+  out_t = Matrix{Float64}(undef,n_models,n_trials)
+  for i in 1:n_models
+    out_t[i,:]=out[i]
+  end
+  out_t
 end
 
 get_Q_ofdata(s::SpkToFit) = get_Q_ofdata(s.spks,s.model_distr,s.spk_bins)
