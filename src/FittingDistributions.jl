@@ -16,5 +16,7 @@ include("fitonstan.jl")
 # in order to make tests, I need to have data!
 include("mock_data.jl")
 
+# let's ditch Stan! Gradient methods to do a ML fit directly
+include("inference_gradients.jl")
 
 end #of module Distr_fit
