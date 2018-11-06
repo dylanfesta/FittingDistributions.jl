@@ -41,6 +41,10 @@ function gradient_test_theta_of_x(x)
   (num=out_num,an=out_an, err = (@. 2.0(out_num-out_an)/(out_num+out_an+eps(100.0))) )
 end
 
+
+
+
+
 cost_dot_theta(theta,q) = log(dot(theta,q))
 function cost_dot_x!(th_alloc,x,q)
   theta_of_x!(th_alloc,x)
@@ -134,3 +138,74 @@ function gradient_test_cost_dirich(x,alphas)
   (num=num,an=an,
       err = (@. 2.0(num-an)/(num+an+eps(100.0))) )
   end
+
+## Full cost , and gradient!
+"""
+  - `h` : is the sum over  models weighted over `th` for  each stimulus
+"""
+struct DirichObjAlloc{M,V}
+  th_alloc::V
+  h_alloc::V
+  dth_alloc::M
+  dmat_alloc::M
+  grad_alloc::V
+end
+
+function DirichObjAlloc(Q::AbstractMatrix)
+  n_models,n_stims = size(Q)
+  dmat=similar(Q)
+  h = Vector{Float64}(undef,n_stims)
+  th = Vector{Float64}(undef,n_models)
+  grad = Vector{Float64}(undef,n_models)
+  dth = Matrix{Float64}(undef,n_models,n_models)
+  DirichObjAlloc(th,h,dth, dmat ,grad)
+end
+
+"""
+Unormalized log probability of coefficients taken as a single
+extraction from a Dirichlet with prior `alphas` and
+turned into a mixture of the model which have probability
+for the data expressed by `Q`
+  -  rows of `Q` are modes, columns are stimuli, values represent the probability
+    of each stimulus in the model corresponding to the row
+"""
+function objective_dirmodel( withgradient::Bool,
+    x , Q::AbstractMatrix , alphas, p::DirichObjAlloc)
+  th = theta_of_x!(p.th_alloc,x)
+  h_vec = mul!(p.h_alloc,transpose(Q),th)
+  cost = 0.0
+  cost += mapreduce(log,+,h_vec)
+  # now the unnormalized Diriclet part
+  for (_th,al) in zip(th,alphas)
+    cost += (al-1.0)*log(_th)
+  end
+  if !withgradient
+    return cost
+  end
+  # now the gradient
+  dth = dtheta_of_x!(p.dth_alloc,x)
+
+  # comparison to Q part
+  mul!(p.dmat_alloc, dth, Q)
+  grad = p.grad_alloc
+  for (t,h) in enumerate(h_vec)
+    BLAS.axpy!(inv(h),view(p.dmat_alloc,:,t) , grad)
+  end
+  # Dirichlet prior part
+  invvect = @. (alphas-1.0)/th
+  BLAS.gemv!('N',1.0,dth,invvect,1.0,grad)
+
+  cost
+end
+
+function gradient_test_dirmodel(x,Q,alphas)
+  alloc = DirichObjAlloc(Q)
+  an = let
+    _ = objective_dirmodel(true,x,Q,alphas,alloc)
+    copy(alloc.grad_alloc)
+  end
+  fg(_x) = objective_dirmodel(false,_x,Q,alphas,alloc)
+  num = Calculus.gradient(fg,x)
+  (num=num,an=an,
+      err = (@. 2.0(num-an)/(num+an+eps(100.0))) )
+end
