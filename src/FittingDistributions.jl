@@ -2,7 +2,7 @@ module FittingDistributions
 using LinearAlgebra , Statistics, Calculus
 using Distributions, Random, StatsBase # mostly for testing
 using CmdStan
-
+using NLopt # for  maximization of analytic lognorm
 # defines the struct of fitting problem, and some oprations on it
 include("fittingStructs.jl")
 

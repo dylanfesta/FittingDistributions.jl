@@ -41,104 +41,6 @@ function gradient_test_theta_of_x(x)
   (num=out_num,an=out_an, err = (@. 2.0(out_num-out_an)/(out_num+out_an+eps(100.0))) )
 end
 
-
-
-
-
-cost_dot_theta(theta,q) = log(dot(theta,q))
-function cost_dot_x!(th_alloc,x,q)
-  theta_of_x!(th_alloc,x)
-  cost_dot_theta(th_alloc,q)
-end
-cost_dot_x(x,q) = cost_dot_x!(similar(x),x,q)
-
-function dcost_dot_x!(dmat_alloc,th_alloc,
-      x::AbstractVector, q::AbstractVector)
-  theta_of_x!(th_alloc,x)
-  dot_thq = dot(th_alloc,q)
-  dtheta_of_x!(dmat_alloc,x)
-  (dmat_alloc * q) .* inv(dot_thq)
-end
-function dcost_dot_x(x,q)
-  n=length(x)
-  theta_alloc=similar(x)
-  dmat_alloc = Matrix{eltype(x)}(undef,n,n)
-  dcost_dot_x!(dmat_alloc,theta_alloc,x,q)
-end
-
-function gradient_test_cost_dot(x::AbstractVector,q::AbstractVector)
-  an = dcost_dot_x(x,q)
-  th_alloc = similar(x)
-  ftest(_x) = cost_dot_x!(th_alloc,_x,q)
-  num = Calculus.gradient(ftest,x)
-  (num=num,an=an,
-    err = (@. 2.0(num-an)/(num+an+eps(100.0))) )
-end
-
-# consider Q as a matrix!
-# too lazy to be memory efficient
-function cost_dot_x(x,Q::AbstractMatrix)
-  th = theta_of_x(x)
-  h_vec = transpose(Q) * th
-  mapreduce(log,+,h_vec)
-end
-
-function dcost_dot_x!(dmat_alloc::AbstractMatrix,
-    x::AbstractVector,Q::AbstractMatrix)
-  th = theta_of_x(x)
-  h_vec_inv = inv.(transpose(Q) * th)
-  Th = dtheta_of_x(x)
-  mul!(dmat_alloc, Th,Q)
-  n_stims = size(Q,2)
-  out = zero(th)
-  for (t,h_inv) in enumerate(h_vec_inv)
-    BLAS.axpy!(h_inv,view(dmat_alloc,:,t) , out)
-  end
-  out
-end
-dcost_dot_x(x::AbstractVector,Q::AbstractMatrix) = dcost_dot_x!(
-        similar(Q),x,Q)
-
-function gradient_test_cost_dot(x::AbstractVector,Q::AbstractMatrix)
-  an = dcost_dot_x(x,Q)
-  ftest(_x) = cost_dot_x(_x,Q)
-  num = Calculus.gradient(ftest,x)
-  (num=num,an=an,
-    err = (@. 2.0(num-an)/(num+an+eps(100.0))) )
-end
-
-
-# now the LogDirichlet part of the cost
-
-function cost_dirich_theta(theta::AbstractVector,alphas)
-  out=0.0
-  for (th,al) in zip(theta,alphas)
-    out += (al-1.0)*log(th)
-  end
-  out
-end
-function cost_dirich_theta_full(theta::AbstractVector,alphas)
-  d=Dirichlet(alphas)
-  logpdf(d,theta)
-end
-cost_dirich_x(x,alphas) = cost_dirich_theta( theta_of_x(x),alphas )
-
-function dcost_dirich_x(x,alphas)
-  _th=theta_of_x(x)
-  broadcast!( (th,alph)->  (alph-1.0)/th , _th,_th,alphas)
-  dth = dtheta_of_x(x)
-  dth*_th
-end
-
-function gradient_test_cost_dirich(x,alphas)
-  an=dcost_dirich_x(x,alphas)
-  th_alloc=similar(x)
-  fg(_x) = cost_dirich_theta_full(theta_of_x!(th_alloc,_x),alphas)
-  num = Calculus.gradient(fg,x)
-  (num=num,an=an,
-      err = (@. 2.0(num-an)/(num+an+eps(100.0))) )
-  end
-
 ## Full cost , and gradient!
 """
   - `h` : is the sum over  models weighted over `th` for  each stimulus
@@ -193,6 +95,7 @@ function objective_dirmodel( withgradient::Bool,
   end
   # Dirichlet prior part
   invvect = @. (alphas-1.0)/th
+  @assert all(isfinite.(invvect))
   BLAS.gemv!('N',1.0,dth,invvect,1.0,grad)
 
   cost
@@ -206,6 +109,56 @@ function gradient_test_dirmodel(x,Q,alphas)
   end
   fg(_x) = objective_dirmodel(false,_x,Q,alphas,alloc)
   num = Calculus.gradient(fg,x)
+  (num=num,an=an,
+      err = (@. 2.0(num-an)/(num+an+eps(100.0))) )
+end
+
+#  minimizer using ... NLOpt ?
+
+function optimize_dirichlet_mixture_costfun(g,x,Q,alphas,alloc::DirichObjAlloc)
+  withgrad=!isempty(g)
+  c = objective_dirmodel(withgrad,x,Q,alphas,alloc)
+  withgrad && copyto!(g,alloc.grad_alloc)
+  c
+end
+
+function optimize_dirichlet_mixture(theta_start, Q , alphas;
+    max_time=-1,function_tolerance=1E-5)
+  x_start = x_of_theta(theta_start)
+  nd=length(x_start)
+  alloc = DirichObjAlloc(Q)
+  _obj_fun(g,x) = optimize_dirichlet_mixture_costfun(g,x,Q,alphas,alloc)
+  opt = Opt(:LD_LBFGS,nd)
+  max_time >0 && maxtime!(opt,60.0*max_time)
+  # lower_bounds!(opt,fill(-30.0,nd) )
+  # upper_bounds!(opt,fill(30.0,nd))
+  # vector_storage!(opt,10)
+  ftol_abs!(opt,function_tolerance)
+  max_objective!(opt,_obj_fun)
+  minf,minx,ret = optimize(opt,x_start)
+  minth = theta_of_x(minx)
+  (minf,minth,minx,ret)
+end
+
+# using the fit problem object !
+function optimize_dirichlet_mixture(theta_start, fit_problem::SpkToFit;
+      max_time=-1,function_tolerance=1E-5)
+  Q = get_Q_ofdata(fit_problem)
+  alphas = fit_problem.fittype.alpha
+  optimize_dirichlet_mixture(theta_start, Q , alphas;
+  max_time=max_time,function_tolerance=function_tolerance)
+end
+
+# meh, should test the gradient
+function gradient_test_dirmodel(x,fit_problem::SpkToFit)
+  Q = get_Q_ofdata(fit_problem)
+  alphas = fit_problem.fittype.alpha
+  alloc = DirichObjAlloc(Q)
+  _cost_fun(g,_x) = optimize_dirichlet_mixture_costfun(g,_x,Q,alphas,alloc)
+  an=similar(x)
+  _ = _cost_fun(an,x)
+  fg(_x) = _cost_fun([],_x)
+  num=Calculus.gradient(fg,x)
   (num=num,an=an,
       err = (@. 2.0(num-an)/(num+an+eps(100.0))) )
 end

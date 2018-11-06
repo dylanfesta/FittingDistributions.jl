@@ -1,4 +1,9 @@
+#=
 
+Sampling on the (un-normalized) log probability of the
+simple dirichlet model on Stan
+
+=#
 
 
 global stan_folder = ""

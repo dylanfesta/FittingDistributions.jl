@@ -1,5 +1,15 @@
 
 
+
+"""
+This instructs how to fit, and contains the prior informtion
+"""
+abstract type DFitType end
+struct DFitDirich{V} <: DFitType
+   alpha::V
+end
+
+
 """
     struct SpkToFit
       spks::Matrix{Float64}
@@ -14,15 +24,16 @@
        dim 1 are probabilities for each bin, dim 2 are models,
       dim 3 are unique inputs (views). The first dimension must sum to 1
 """
-struct SpkToFit{T}
+struct SpkToFit{T,DD}
   spks::Matrix{T}
   spk_bins::Vector{Float64}
   model_distr:: Array{Float64,3}
-  function  SpkToFit(spks,spk_bins,model_distr)
+  fittype::DD
+  function  SpkToFit(spks,spk_bins,model_distr,fittype::DFitType)
     tot_prob =  sum(model_distr,dims=1)
     @assert all( isapprox.(tot_prob,1.0,atol=1E-5) ) "probability must sum to 1 ! "
     #@assert all( spks .>= 0.0 ) "spike counts should be positive"
-    new{eltype(spks)}(spks,spk_bins,model_distr)
+    new{eltype(spks),typeof(fittype)}(spks,spk_bins,model_distr,fittype)
   end
 end
 n_models(s::SpkToFit) = size(s.model_distr,2)
@@ -43,9 +54,9 @@ end
 # if there is missing data, it just ignores it
 # also ignores data outside the boundaries
 function bin_idx(data::AbstractVector{T},bins::Vector{Float64}) where T
-  r_max = bins[end]
+  r_min,r_max = bins[1],bins[end]
   _data = filter(data) do d
-    !ismissing(d) && d < r_max
+    !ismissing(d) && (r_min <= d < r_max)
   end
   out=similar(_data,Int32)
   for (i,dat) in enumerate(_data)
@@ -69,15 +80,11 @@ function get_Q_ofdata(spikecounts_all::AbstractMatrix{T} ,
   n_bins,n_models,n_views = size(q_all)
   out = map(1:n_views) do vv
     get_Q_ofdata(
-      view(spikecounts_all,:,vv) ,
-      view(q_all,:,:,vv), bins)
+      selectdim(spikecounts_all,2,vv) ,
+      selectdim(q_all,3,vv), bins)
   end
-  n_trials = length(out[1])
-  out_t = Matrix{Float64}(undef,n_models,n_trials)
-  for i in 1:n_models
-    out_t[i,:]=out[i]
-  end
-  out_t
+  # just collect and transpose
+  permutedims(vcat(out...))
 end
 
 get_Q_ofdata(s::SpkToFit) = get_Q_ofdata(s.spks,s.model_distr,s.spk_bins)
