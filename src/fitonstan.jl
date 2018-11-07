@@ -75,18 +75,17 @@ const stan_discrete_distr_fit = """
 
 # function
 
-function sample_posterior(fit_problem::SpkToFit, n_samples ;
-        dir_prior=0.1,
+function sample_posterior(fit_problem::SpkToFit{T,DFitDirich}, n_samples ;
         thin_val=2,
         nchains=4,
-        pdir=joinpath(@__DIR__(),"../tmp") )
+        pdir=joinpath(@__DIR__(),"../tmp") ) where T
     @assert !isempty(stan_folder) "Please set the folder of cmdstan using set_stan_folder"
     println("the following temporary directory will be used" * pdir)
     n_mod = n_models(fit_problem)
     q_vals = get_Q_ofdata(fit_problem)
     @assert n_mod == size(q_vals,1)
     n_trials = size(q_vals,2)
-    dir_prior = fill(dir_prior,n_mod)
+    dir_prior = fit_problem.fittype.alpha
     Data=[  Dict("K"=>n_mod,"T"=>n_trials,
                     "Q"=>q_vals,"theta"=>dir_prior ) for i in (1:nchains) ]
     stanmodel = Stanmodel(num_samples=n_samples,

@@ -5,8 +5,8 @@
 This instructs how to fit, and contains the prior informtion
 """
 abstract type DFitType end
-struct DFitDirich{V} <: DFitType
-   alpha::V
+struct DFitDirich <: DFitType
+   alpha::Vector{Float64}
 end
 
 

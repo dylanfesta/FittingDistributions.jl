@@ -19,8 +19,7 @@ fit_problem = D.SpkToFit(mock_data,bins,qvals,D.DFitDirich(alphas_test))
 
 q_data = D.get_Q_ofdata(fit_problem)
 D.set_stan_folder("/home/dfesta/.cmdstan-2.18.0")
-alphas = D.sample_posterior(fit_problem,1000;
-              dir_prior=0.01)
+alphas = D.sample_posterior(fit_problem,1000)
 
 ##
 using Plots
