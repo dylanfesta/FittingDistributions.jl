@@ -19,4 +19,7 @@ include("mock_data.jl")
 # let's ditch Stan! Gradient methods to do a ML fit directly
 include("inference_gradients.jl")
 
+# log probability of new data, matched against different controls!
+include("teststuff.jl")
+
 end #of module Distr_fit

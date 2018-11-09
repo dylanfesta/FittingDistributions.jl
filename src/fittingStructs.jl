@@ -8,6 +8,8 @@ abstract type DFitType end
 struct DFitDirich <: DFitType
    alpha::Vector{Float64}
 end
+struct NoPrior <: DFitType end
+
 
 
 """
@@ -69,11 +71,28 @@ end
 #
 function get_Q_ofdata(spikecounts::AbstractVector{T},
   q_img::AbstractMatrix,bins::AbstractVector) where T
+  @assert size(q_img,1) == length(bins)-1 "careful size q is  $(size(q_img)) and bins are $(length(bins)) "
   mybins = bin_idx(spikecounts,bins)
-  @assert size(q_img,1) == length(bins)-1
   q_img[mybins,:] #over all models and all trials!
 end
 
+
+"""
+  function get_Q_ofdata(spikecounts_all::AbstractMatrix{T} ,
+        q_all::AbstractArray{Float64,3},
+        bins::AbstractVector) where T
+
+# Inputs
+  - `spikecounts_all` :  neural (or mock) data, rows are trials, columns are different
+     unique views
+  - `q_all` : discrete  probability distributions to match, dim 1 is bins, dim 2 is
+         models , dim 3 is views
+  - `bins` : bins
+# output
+Matrix Q ,  rows are models, columns are the spikecounts that have been accepted
+(total trials). Spikecounts are not accepted if they are missing, or out of the
+bounds of bins
+"""
 function get_Q_ofdata(spikecounts_all::AbstractMatrix{T} ,
       q_all::AbstractArray{Float64,3},
       bins::AbstractVector) where T
@@ -86,5 +105,26 @@ function get_Q_ofdata(spikecounts_all::AbstractMatrix{T} ,
   # just collect and transpose
   permutedims(vcat(out...))
 end
+
+# for generality, here is a version with a single model
+# the model is still repreated for each image
+function get_Q_ofdata(spikecounts_all::AbstractMatrix{T} ,
+      q_all::AbstractArray{Float64,2},
+      bins::AbstractVector) where T
+  (r,c) = size(q_all)
+  q3 = reshape(q_all,r,1,c)
+  get_Q_ofdata(spikecounts_all,q3,bins) # this will be a row vector!
+end
+
+# meh , the model is the same for all views
+# (may as well convert spikecounts into a single vector!)
+function get_Q_ofdata(spikecounts_all::AbstractMatrix{T} ,
+      q_all::AbstractArray{Float64,1},
+      bins::AbstractVector) where T
+  n_views = size(spikecounts_all,2)
+  q_allm =repeat(q_all,outer=(1,n_views))
+  get_Q_ofdata(spikecounts_all,q_allm,bins) # this calls the one above
+end
+
 
 get_Q_ofdata(s::SpkToFit) = get_Q_ofdata(s.spks,s.model_distr,s.spk_bins)

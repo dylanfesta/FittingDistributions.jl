@@ -26,6 +26,8 @@ q_data = D.get_Q_ofdata(fit_problem)
 D.set_stan_folder("/home/dfesta/.cmdstan-2.18.0")
 alphas = D.sample_posterior(fit_problem,1000)
 
+alphas_guess = mean(alphas;dims=2)|> vec
+
 ##
 using Plots
 
@@ -40,11 +42,5 @@ pp = let
   plot!()
 end
 
-histogram(alphas[2,:],opacity=0.5,leg=false,nbins=10)
-histogram!(alphas[2,:],opacity=0.5,leg=false)
-histogram!(alphas[3,:],opacity=0.5,leg=false)
-histogram!(alphas[4,:],opacity=0.5,leg=false)
-histogram!(alphas[5,:],opacity=0.5,leg=false)
-histogram!(alphas[6,:],opacity=0.5,leg=false)
-histogram!(alphas[7,:],opacity=0.5,leg=false)
-histogram!(alphas[8,:],opacity=0.5,leg=false)
+bar(alphas_guess)
+##
