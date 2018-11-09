@@ -6,11 +6,11 @@ using Statistics,LinearAlgebra, StatsBase
 const D = FittingDistributions
 
 ##
-n_reps_train=33
-n_reps_test = 31
+n_reps_train=5
+n_reps_test = 50
 n_reps = n_reps_train + n_reps_test
 n_models= 8
-n_views=10
+n_views=3
 
 
 alphas_test = fill(0.1,n_models)
@@ -35,6 +35,11 @@ bar(alphas_guess)
 
 ##
 
+theta_guess = alphas_guess ./ sum(alphas_guess)
+
+D.loglik_score_vs_uni(bins, mock_data_test, qvals, qvals[:,ground_idx,:],
+    theta_guess, D.NoPrior())
+
 # LL 0 model (sucks!)
 D.logprob_data_uniform(mock_data_test,bins)
 # LL oracle (best!)
@@ -49,3 +54,15 @@ D.logprob_data(mock_data_test,bins, qvals, fake_theta ,
 # LL guess
 D.logprob_data(mock_data_test,fit_problem,alphas_guess,D.NoPrior())
 D.logprob_data(mock_data_test,fit_problem,alphas_guess,fit_problem.fittype)
+
+
+# check the difference is the same ...
+diff1 = let
+      alph = alphas_guess ./ sum(alphas_guess)
+      myprior = D.DFitDirich(alph)
+      llg1 = D.logprob_data(mock_data_test,bins, qvals, alph ,myprior)
+      llg2 = D.logprob_data(mock_data_test,bins, qvals, alph ,D.NoPrior())
+      llgr = D.logprob_data_uniform(mock_data_test,bins)
+      llo1 = D.logprob_data(mock_data_test,bins, qvals[:,ground_idx,:])
+      (llg1-llgr)/(llo1-llgr)
+end

@@ -60,7 +60,7 @@ end
 """
   function logprob_data(spikecounts, s::SpkToFit ,
       theta,
-      prior = missing ;
+      prior_theta = NoPrior ;
       normalize=false)
 
 Takes the bins and the distributions from fit problem object
@@ -69,16 +69,30 @@ spikecounts need to be provided (it's a cross validation)
 along with the solution (that must sum to 1)
 """
 function logprob_data(spikecounts, s::SpkToFit ,
-    theta, prior = missing ;
+    theta, prior_theta=D.NoPrior() ;
     normalize=false)
-    prior = ismissing(prior) ? s.fittype : prior
-    logprob_data(spikecounts ,s.spk_bins, s.model_distr,theta, prior ;
+    logprob_data(spikecounts ,s.spk_bins, s.model_distr,theta, prior_theta ;
       normalize = normalize )
 end
-
 
 function logprob_data_uniform(spikecounts,bins; normalize=false)
   nb = length(bins)-1
   qdistr = fill(1/nb,nb)
   logprob_data(spikecounts,bins,qdistr,[1.0],NoPrior(); normalize = normalize )
+end
+
+
+"""
+    function loglik_score_vs_uni(bins, data_test, target_distrtrib, oracle_distrib,
+        theta_guess, prior=NoPrior())
+Computes the cross-validation score of the fit, as in
+(ll_guess-ll_uniform)/(ll_oracle-ll_uniform)
+"""
+function loglik_score_vs_uni(bins, data_test, target_distr, oracle_distr,
+    theta_guess, prior=NoPrior())
+    theta_guess ./= sum(theta_guess)
+    ll_guess = logprob_data(data_test,bins, target_distr, theta_guess ,prior)
+    ll_uniform  =  logprob_data_uniform(data_test,bins)
+    ll_oracle = logprob_data(data_test,bins,oracle_distr)
+    (ll_guess-ll_uniform)/(ll_oracle-ll_uniform)
 end
