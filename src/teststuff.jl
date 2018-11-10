@@ -21,8 +21,8 @@ end
 
 logprob_logprior(thetas,p::NoPrior) = 0.0
 function logprob_logprior(thetas,p::DFitDirich)
-    @show di=Dirichlet(p.alpha)
-    @show logpdf(di,thetas)
+    di=Dirichlet(p.alpha)
+    logpdf(di,thetas)
 end
 
 # when  no thetas, take first
