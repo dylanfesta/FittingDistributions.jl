@@ -96,3 +96,13 @@ function loglik_score_vs_uni(bins, data_test, target_distr, oracle_distr,
     ll_oracle = logprob_data(data_test,bins,oracle_distr)
     (ll_guess-ll_uniform)/(ll_oracle-ll_uniform)
 end
+
+
+function loglik_score_vs_model(bins,data_test, target_distr, null_distr,oracle_distr,
+  theta_guess,prior=NoPrior())
+  theta_guess ./= sum(theta_guess)
+  ll_guess = logprob_data(data_test,bins, target_distr, theta_guess ,prior)
+  ll_null  =  logprob_data(data_test,bins,null_distr)
+  ll_oracle = logprob_data(data_test,bins,oracle_distr)
+  (ll_guess-ll_null)/(ll_oracle-ll_null)
+end
